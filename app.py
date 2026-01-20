@@ -3,175 +3,217 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# ------------------------------------
-# Global Plot Font Settings (Clean Look)
-# ------------------------------------
-plt.rcParams.update({
-    "font.size": 10,
-    "axes.titlesize": 12,
-    "axes.labelsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9
-})
-
-# ------------------------------------
-# Streamlit Page Config
-# ------------------------------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="RoadSafe Analytics",
+    page_title="RoadSafe Analytics Dashboard",
     layout="wide"
 )
 
-# ------------------------------------
-# Custom CSS for Font Control (OPTION 4)
-# ------------------------------------
-st.markdown("""
-<style>
-h1 { font-size: 36px; }
-h2 { font-size: 26px; }
-h3 { font-size: 20px; }
-p  { font-size: 15px; }
-</style>
-""", unsafe_allow_html=True)
+sns.set_theme(style="darkgrid")
 
-# ------------------------------------
-# Title Section
-# ------------------------------------
-st.title("🚦 RoadSafe Analytics Dashboard")
-st.write("Exploratory Data Analysis of US Road Accidents")
-
-# ------------------------------------
-# Load Dataset
-# ------------------------------------
+# ---------------- LOAD DATA ----------------
 @st.cache_data
 def load_data():
-    return pd.read_csv("dataset/US_Accidents_March23.csv")
+    df = pd.read_csv("dataset/US_Accidents_March23.csv")
+
+    df['Start_Time'] = pd.to_datetime(df['Start_Time'], errors='coerce')
+    df = df.dropna(subset=['Start_Time'])
+
+    df['Date'] = df['Start_Time'].dt.normalize()
+    df['Hour'] = df['Start_Time'].dt.hour
+    df['Weekday'] = df['Start_Time'].dt.day_name()
+
+    df['Time_Of_Day'] = df['Hour'].apply(
+        lambda x: "Day" if 6 <= x < 18 else "Night"
+    )
+
+    return df
 
 df = load_data()
 
-# ------------------------------------
-# Dataset Preview
-# ------------------------------------
-st.markdown("### 📄 Dataset Preview")
-st.dataframe(df.head(50), use_container_width=True)
+# ---------------- SIDEBAR FILTERS ----------------
+st.sidebar.title("🔍 Filters")
 
-# ------------------------------------
-# Accident Severity Distribution
-# ------------------------------------
-st.markdown("### 🚨 Accident Severity Distribution")
-
-severity_counts = df['Severity'].value_counts().sort_index()
-
-fig, ax = plt.subplots(figsize=(6,4))
-sns.barplot(
-    x=severity_counts.index,
-    y=severity_counts.values,
-    palette="Reds",
-    ax=ax
+states = st.sidebar.multiselect(
+    "Select States",
+    sorted(df['State'].dropna().unique()),
+    default=["CA", "TX", "FL"]
 )
 
-ax.set_xlabel("Severity Level (1 = Low, 4 = High)")
-ax.set_ylabel("Number of Accidents")
-ax.set_title("Distribution of Accident Severity")
-
-st.pyplot(fig)
-
-st.info(
-    "Most accidents fall under Severity levels 2 and 3, "
-    "indicating that moderate-impact crashes are the most common."
+severity = st.sidebar.multiselect(
+    "Select Severity",
+    sorted(df['Severity'].dropna().unique()),
+    default=[2, 3]
 )
 
-# ------------------------------------
-# Accidents by Hour of Day
-# ------------------------------------
-st.markdown("### ⏰ Accidents by Hour of Day")
-
-df['Start_Time'] = pd.to_datetime(df['Start_Time'], errors='coerce')
-df['Hour'] = df['Start_Time'].dt.hour
-
-hour_counts = df['Hour'].value_counts().sort_index()
-
-fig, ax = plt.subplots(figsize=(7,4))
-sns.barplot(
-    x=hour_counts.index,
-    y=hour_counts.values,
-    color="steelblue",
-    ax=ax
+weather = st.sidebar.multiselect(
+    "Select Weather",
+    sorted(df['Weather_Condition'].dropna().unique()),
+    default=df['Weather_Condition'].dropna().unique()[:5]
 )
 
-ax.set_xlabel("Hour of Day (0–23)")
-ax.set_ylabel("Number of Accidents")
-ax.set_title("Accidents Distribution by Hour")
-
-st.pyplot(fig)
-
-st.info(
-    "Accident frequency peaks during morning and evening rush hours, "
-    "highlighting traffic congestion as a major contributing factor."
+time_of_day = st.sidebar.radio(
+    "Time of Day",
+    ["All", "Day", "Night"]
 )
 
-# ------------------------------------
-# Top 5 Accident-Prone States
-# ------------------------------------
-st.markdown("### 📍 Top 5 Accident-Prone States")
+min_date = df['Date'].min()
+max_date = df['Date'].max()
 
-top_states = df['State'].value_counts().head(5)
-
-fig, ax = plt.subplots(figsize=(6,4))
-sns.barplot(
-    x=top_states.values,
-    y=top_states.index,
-    color="tomato",
-    ax=ax
+date_range = st.sidebar.date_input(
+    "Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
 )
 
-ax.set_xlabel("Number of Accidents")
-ax.set_ylabel("State")
-ax.set_title("Top 5 States with Highest Accident Counts")
+# ---------------- APPLY FILTERS ----------------
+filtered_df = df[
+    (df['State'].isin(states)) &
+    (df['Severity'].isin(severity)) &
+    (df['Weather_Condition'].isin(weather)) &
+    (df['Date'] >= pd.to_datetime(date_range[0])) &
+    (df['Date'] <= pd.to_datetime(date_range[1]))
+]
 
-st.pyplot(fig)
+if time_of_day != "All":
+    filtered_df = filtered_df[filtered_df['Time_Of_Day'] == time_of_day]
 
-st.info(
-    "A small number of large states account for a significant proportion "
-    "of total accidents, likely due to higher population and traffic density."
+st.sidebar.success(f"Records: {len(filtered_df)}")
+
+# ---------------- TITLE ----------------
+st.title("🚦 RoadSafe Analytics – Interactive Dashboard")
+st.markdown("US Road Accident Analysis with Dynamic Filters")
+
+# ---------------- TABS ----------------
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📊 Overview", "⏰ Time Analysis", "🌍 Geospatial", "🔥 Insights"]
 )
 
-# ------------------------------------
-# Geospatial Accident Hotspots
-# ------------------------------------
-st.markdown("### 🌍 Accident Hotspots Across the US")
+# =====================================================
+# TAB 1: OVERVIEW (4 PLOTS)
+# =====================================================
+with tab1:
+    col1, col2 = st.columns(2)
 
-geo_sample = df[['Start_Lat', 'Start_Lng']].dropna().sample(50000, random_state=42)
+    with col1:
+        st.subheader("Severity Distribution")
+        sev_cnt = filtered_df['Severity'].value_counts().sort_index()
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.barplot(x=sev_cnt.index, y=sev_cnt.values, palette="Reds", ax=ax)
+        st.pyplot(fig)
 
-fig, ax = plt.subplots(figsize=(8,6))
-ax.scatter(
-    geo_sample['Start_Lng'],
-    geo_sample['Start_Lat'],
-    s=1,
-    alpha=0.3
-)
+    with col2:
+        st.subheader("Top Accident-Prone States")
+        top_states = filtered_df['State'].value_counts().head(5)
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.barplot(x=top_states.values, y=top_states.index, palette="Blues", ax=ax)
+        st.pyplot(fig)
 
-ax.set_xlabel("Longitude")
-ax.set_ylabel("Latitude")
-ax.set_title("Accident Hotspots (Latitude vs Longitude)")
+    col3, col4 = st.columns(2)
 
-st.pyplot(fig)
+    with col3:
+        st.subheader("Accidents by Weather")
+        weather_cnt = filtered_df['Weather_Condition'].value_counts().head(5)
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.barplot(x=weather_cnt.values, y=weather_cnt.index, palette="coolwarm", ax=ax)
+        st.pyplot(fig)
 
-st.info(
-    "Accident hotspots are heavily concentrated in urban regions and "
-    "along major highway corridors across the United States."
-)
+    with col4:
+        st.subheader("Day vs Night Accidents")
+        tod_cnt = filtered_df['Time_Of_Day'].value_counts()
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.barplot(x=tod_cnt.index, y=tod_cnt.values, palette="Set2", ax=ax)
+        st.pyplot(fig)
 
-# ------------------------------------
-# Key Takeaways
-# ------------------------------------
-st.markdown("### 📌 Key Takeaways")
+# =====================================================
+# TAB 2: TIME ANALYSIS (4 PLOTS)
+# =====================================================
+with tab2:
+    col1, col2 = st.columns(2)
 
-st.markdown("""
-- Most road accidents are of **moderate severity**, rather than extreme.
-- **Time of day** plays a critical role, with peaks during rush hours.
-- Accident distribution is **geographically uneven**, concentrated in a few states.
-- Urban areas and highways emerge as major **accident hotspots**.
-- Human activity and traffic patterns influence accidents more than weather factors.
-""")
+    with col1:
+        st.subheader("Accidents by Hour")
+        hour_cnt = filtered_df['Hour'].value_counts().sort_index()
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.lineplot(x=hour_cnt.index, y=hour_cnt.values, ax=ax)
+        st.pyplot(fig)
+
+    with col2:
+        st.subheader("Accidents by Weekday")
+        day_cnt = filtered_df['Weekday'].value_counts()
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.barplot(x=day_cnt.values, y=day_cnt.index, palette="viridis", ax=ax)
+        st.pyplot(fig)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.subheader("Severity vs Time of Day")
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.countplot(
+            data=filtered_df,
+            x="Severity",
+            hue="Time_Of_Day",
+            palette="Set1",
+            ax=ax
+        )
+        st.pyplot(fig)
+
+    with col4:
+        st.subheader("Hourly Severity Heatmap")
+        heat = pd.crosstab(filtered_df['Hour'], filtered_df['Severity'])
+        fig, ax = plt.subplots(figsize=(4,3))
+        sns.heatmap(heat, cmap="YlOrRd", ax=ax)
+        st.pyplot(fig)
+
+# =====================================================
+# TAB 3: GEOSPATIAL
+# =====================================================
+with tab3:
+    st.subheader("Accident Hotspots")
+
+    geo_df = filtered_df[['Start_Lat', 'Start_Lng']].dropna()
+    geo_df = geo_df.sample(min(40000, len(geo_df)), random_state=42)
+
+    st.map(
+        geo_df.rename(columns={
+            "Start_Lat": "lat",
+            "Start_Lng": "lon"
+        })
+    )
+
+# =====================================================
+# TAB 4: INSIGHTS
+# =====================================================
+with tab4:
+    st.subheader("Correlation Heatmap")
+
+    corr_cols = [
+        'Severity',
+        'Distance(mi)',
+        'Temperature(F)',
+        'Humidity(%)',
+        'Visibility(mi)'
+    ]
+
+    corr_df = filtered_df[corr_cols].dropna()
+
+    fig, ax = plt.subplots(figsize=(5,4))
+    sns.heatmap(
+        corr_df.corr(),
+        annot=True,
+        cmap="coolwarm",
+        fmt=".2f",
+        ax=ax
+    )
+    st.pyplot(fig)
+
+    st.markdown("""
+    **Key Insights**
+    - Majority accidents occur during **daytime** but night accidents tend to be severe
+    - **Rush hours** show highest accident density
+    - Weather conditions alone do not strongly impact severity
+    - Urban regions dominate accident hotspots
+    """)
+
